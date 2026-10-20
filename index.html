@@ -1,0 +1,735 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>곡선 도로 시뮬레이터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* Layout: 왼쪽에 위에서 본 주행 장면, 오른쪽에 변인 조절 패널, 아래에 통계 표 세 개. 도로 아스팔트와 구심력 화살표(주황 계열)를 중심 색으로 사용. */
+:root {
+  --bg: #edf0f3;
+  --surface: #fbfcfd;
+  --ink: #101c26;
+  --muted: #556675;
+  --line: #d3dbe2;
+  --accent: #0a6c9e;
+  --accent-soft: #dcebf4;
+  --force: #d6452a;
+  --ok: #1b7f54;
+  --ok-soft: #ddf0e6;
+  --warn: #8f5a00;
+  --warn-soft: #f7ebd0;
+  --bad: #b8362a;
+  --bad-soft: #f8ddd9;
+  --road: #2b323a;
+  --road-edge: #c9d1d8;
+  --lane: #e3c04b;
+  --ground: #dfe8e2;
+  --grid: #cdd9d1;
+  --font-body: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1318;
+    --surface: #161d24;
+    --ink: #e6edf3;
+    --muted: #93a4b3;
+    --line: #2a3540;
+    --accent: #4db2e6;
+    --accent-soft: #16303f;
+    --force: #ff7a5c;
+    --ok: #4fc08a;
+    --ok-soft: #123023;
+    --warn: #e5b04a;
+    --warn-soft: #352a12;
+    --bad: #ff8577;
+    --bad-soft: #3a1b18;
+    --road: #2a323a;
+    --road-edge: #55626e;
+    --lane: #c9a62f;
+    --ground: #111a1f;
+    --grid: #1b2830;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1318;
+  --surface: #161d24;
+  --ink: #e6edf3;
+  --muted: #93a4b3;
+  --line: #2a3540;
+  --accent: #4db2e6;
+  --accent-soft: #16303f;
+  --force: #ff7a5c;
+  --ok: #4fc08a;
+  --ok-soft: #123023;
+  --warn: #e5b04a;
+  --warn-soft: #352a12;
+  --bad: #ff8577;
+  --bad-soft: #3a1b18;
+  --road: #2a323a;
+  --road-edge: #55626e;
+  --lane: #c9a62f;
+  --ground: #111a1f;
+  --grid: #1b2830;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+  padding-block: 20px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 18px; }
+
+/* header */
+.head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+.eyebrow { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 4px; }
+h1 { font-size: clamp(24px, 4.2vw, 34px); line-height: 1.2; margin: 0; font-weight: 700; letter-spacing: -.01em; text-wrap: balance; }
+.laws { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.laws li { font-family: var(--font-mono); font-size: 13px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); white-space: nowrap; }
+.laws li b { color: var(--force); font-weight: 600; }
+
+/* main grid */
+.main { display: grid; gap: 18px; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; min-width: 0; }
+h2 { font-size: 15px; margin: 0 0 12px; font-weight: 700; }
+.card-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 10px; }
+.card-top h2 { margin: 0; }
+
+/* status banner */
+.banner { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; border: 1px solid transparent; }
+.banner[data-s="grip"] { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.banner[data-s="out"] { background: var(--bad-soft); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 35%, transparent); }
+.banner[data-s="in"] { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.banner .t { font-weight: 700; display: block; }
+.banner .d { font-family: var(--font-mono); font-size: 12px; opacity: .92; display: block; margin-top: 2px; }
+
+/* canvases */
+.stage { width: 100%; max-width: 680px; margin: 0 auto; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); background: var(--ground); }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+.sidebox { width: 100%; aspect-ratio: 16 / 9; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--ground); }
+.sidebox canvas { display: block; width: 100%; height: 100%; }
+
+/* buttons */
+.btns { display: flex; flex-wrap: wrap; gap: 6px; }
+button { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 6px 12px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+:root[data-theme="dark"] button.primary { color: #06202e; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.primary { color: #06202e; } }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+select { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; }
+
+/* controls */
+.ctl { padding: 10px 0; border-top: 1px solid var(--line); }
+.ctl:first-of-type { border-top: 0; padding-top: 0; }
+.ctl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.ctl label { font-weight: 500; }
+.num { display: inline-flex; align-items: baseline; gap: 6px; }
+.num input { width: 92px; font-family: var(--font-mono); font-size: 14px; text-align: right; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 7px; font-variant-numeric: tabular-nums; }
+.unit { font-family: var(--font-mono); font-size: 12px; color: var(--muted); min-width: 30px; }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 2px 0; }
+.hint { margin: 2px 0 0; font-size: 12px; color: var(--muted); }
+.grp { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 14px 0 8px; display: flex; align-items: center; gap: 10px; }
+.grp::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.grp:first-child { margin-top: 0; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* tables */
+.tables { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); align-items: start; }
+.tscroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+thead th { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+td.n, th.n { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.u { font-family: var(--font-mono); font-size: 12px; color: var(--muted); white-space: nowrap; }
+td.f { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+tr.sec th { background: var(--bg); color: var(--ink); font-size: 12px; font-weight: 700; letter-spacing: .02em; padding: 5px 10px; }
+tr.key td { font-weight: 700; }
+tr.key td.n { color: var(--force); }
+tr.base td { background: var(--accent-soft); }
+td.sub { padding-left: 24px; color: var(--muted); }
+.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
+.chip.grip { background: var(--ok-soft); color: var(--ok); }
+.chip.out { background: var(--bad-soft); color: var(--bad); }
+.chip.in { background: var(--warn-soft); color: var(--warn); }
+.ratio { display: inline-flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.ratio .bar { width: 56px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.ratio .bar i { display: block; height: 100%; background: var(--force); }
+.note { font-size: 12px; color: var(--muted); margin: 10px 0 0; }
+.empty { padding: 18px 10px; color: var(--muted); text-align: center; }
+.foot { font-size: 12px; color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div>
+      <p class="eyebrow">등속 원운동 시뮬레이션 실험</p>
+      <h1>자동차의 구심력과 곡선 주행</h1>
+    </div>
+    <ul class="laws" aria-label="핵심 공식">
+      <li><b>F</b> = m v² / r</li>
+      <li>F ∝ m · v² · 1/r</li>
+      <li>v₀ = √(g r tanθ)</li>
+    </ul>
+  </header>
+
+  <div class="main">
+    <section class="card" aria-labelledby="h-sim">
+      <div class="card-top">
+        <h2 id="h-sim">위에서 본 주행 장면</h2>
+        <div class="btns">
+          <button id="b-play" class="primary" type="button">일시정지</button>
+          <button id="b-reset" type="button">차량 되돌리기</button>
+          <select id="s-speed" aria-label="재생 배속">
+            <option value="0.5">0.5배속</option>
+            <option value="1" selected>1배속</option>
+            <option value="2">2배속</option>
+            <option value="4">4배속</option>
+          </select>
+        </div>
+      </div>
+      <div id="banner" class="banner" data-s="grip" role="status" aria-live="polite">
+        <div><span class="t" id="bn-t"></span><span class="d" id="bn-d"></span></div>
+      </div>
+      <div class="stage"><canvas id="cv" role="img" aria-label="원형 곡선 도로를 달리는 자동차를 위에서 본 시뮬레이션 화면"></canvas></div>
+      <ul class="legend">
+        <li><i style="background: var(--force)"></i>구심력 방향</li>
+        <li><i style="background: var(--ok)"></i>속도 방향</li>
+        <li><i style="background: var(--accent)"></i>정상 주행 궤적</li>
+        <li><i style="background: var(--bad)"></i>미끄러진 구간</li>
+      </ul>
+    </section>
+
+    <aside class="card" aria-labelledby="h-ctl">
+      <h2 id="h-ctl">변인 조절</h2>
+      <div class="grp">조작 변인</div>
+      <div id="ctl-main"></div>
+      <div class="grp">도로 조건</div>
+      <div id="ctl-road"></div>
+      <div class="grp">상황 불러오기</div>
+      <div class="presets" id="presets"></div>
+      <div class="grp">힘의 방향 (옆에서 본 단면)</div>
+      <div class="sidebox"><canvas id="cv2" role="img" aria-label="경사진 도로 위 자동차에 작용하는 중력, 수직항력, 마찰력, 구심력을 옆에서 본 그림"></canvas></div>
+    </aside>
+  </div>
+
+  <div class="tables">
+    <section class="card" aria-labelledby="h-t1">
+      <h2 id="h-t1">현재 조건 계산표</h2>
+      <div class="tscroll"><table id="t-calc"></table></div>
+      <p class="note">g = 9.8 m/s². 수직항력과 마찰력은 경사면을 기준으로 계산하고, 구심력은 수평 방향 합력으로 나타냈습니다.</p>
+    </section>
+
+    <section class="card" aria-labelledby="h-t2">
+      <h2 id="h-t2">변인별 구심력 비교</h2>
+      <div class="tscroll"><table id="t-sens"></table></div>
+      <p class="note">한 번에 변인 하나만 바꾸고 나머지는 현재 값으로 둔 결과입니다. 질량은 구심력만 바꾸고 주행 판정은 바꾸지 않습니다.</p>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="h-t3">
+    <div class="card-top">
+      <h2 id="h-t3">실험 기록</h2>
+      <div class="btns">
+        <button id="b-log" class="primary" type="button">현재 조건 기록</button>
+        <button id="b-copy" type="button">표 복사</button>
+        <button id="b-clear" type="button">기록 지우기</button>
+      </div>
+    </div>
+    <div class="tscroll"><table id="t-log"></table></div>
+    <p class="note" id="copy-note" role="status"></p>
+  </section>
+
+  <p class="foot">모델의 가정: 자동차를 한 점으로 보고 공기 저항과 타이어 변형은 무시합니다. 마찰은 최대 정지 마찰력(μN)까지만 낼 수 있다고 봅니다. 도로 폭은 10 m입니다.</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var G = 9.8, ROAD_W = 10, TWO_PI = Math.PI * 2;
+  var DEF = { kmh: 70, m: 1500, r: 60, th: 8, mu: 0.7 };
+  var P = { kmh: DEF.kmh, m: DEF.m, r: DEF.r, th: DEF.th, mu: DEF.mu };
+
+  var FIELDS = [
+    { k: 'kmh', label: '속력 v', unit: 'km/h', min: 0, max: 200, step: 1, grp: 'main', hint: '구심력은 속력의 제곱에 비례합니다. 속력을 2배로 하면 구심력은 4배입니다.' },
+    { k: 'm', label: '질량 m', unit: 'kg', min: 500, max: 10000, step: 50, grp: 'main', hint: '구심력은 질량에 비례합니다. 궤적은 질량과 관계없이 같습니다.' },
+    { k: 'r', label: '회전 반지름 r', unit: 'm', min: 20, max: 200, step: 1, grp: 'main', hint: '구심력은 반지름에 반비례합니다. 바꾸면 차량이 처음 위치로 돌아갑니다.' },
+    { k: 'th', label: '도로 경사각 θ', unit: '°', min: 0, max: 30, step: 0.5, grp: 'road', hint: '경사가 커지면 수직항력의 수평 성분이 구심력을 더 많이 담당합니다.' },
+    { k: 'mu', label: '노면 마찰 계수 μ', unit: '', min: 0, max: 1.2, step: 0.01, grp: 'road', hint: '대략 마른 아스팔트 0.7, 젖은 노면 0.4, 빙판 0.1 정도입니다.' }
+  ];
+  var DEC = { kmh: 0, m: 0, r: 0, th: 1, mu: 2 };
+
+  /* ---------- physics ---------- */
+  function calc(p) {
+    var v = p.kmh / 3.6, th = p.th * Math.PI / 180;
+    var t = Math.tan(th), s = Math.sin(th), c = Math.cos(th);
+    var a = v * v / p.r, F = p.m * a;
+    var N = p.m * (G * c + a * s);
+    var f = p.m * (a * c - G * s); // 양수: 경사면 아래(도로 중심 쪽) 방향
+    var fmax = p.mu * N;
+    var den = 1 - p.mu * t;
+    var aMax = den > 0 ? G * (t + p.mu) / den : Infinity;
+    var aMin = t > p.mu ? G * (t - p.mu) / (1 + p.mu * t) : 0;
+    var status = a > aMax ? 'out' : (a < aMin ? 'in' : 'grip');
+    return {
+      v: v, th: th, a: a, F: F, N: N, f: f, fmax: fmax, Fn: N * s, Ff: f * c,
+      v0: Math.sqrt(G * p.r * t),
+      vMin: Math.sqrt(aMin * p.r) * 3.6,
+      vMax: isFinite(aMax) ? Math.sqrt(aMax * p.r) * 3.6 : Infinity,
+      aMax: aMax, aMin: aMin, status: status,
+      T: v > 0 ? TWO_PI * p.r / v : Infinity
+    };
+  }
+  var STATUS_LABEL = { grip: '안정 주행', out: '바깥으로 미끄러짐', 'in': '안쪽으로 미끄러짐' };
+
+  /* ---------- helpers ---------- */
+  function $(id) { return document.getElementById(id); }
+  function nf(x, d) {
+    if (!isFinite(x)) return '—';
+    return x.toLocaleString('ko-KR', { minimumFractionDigits: d, maximumFractionDigits: d });
+  }
+  function clamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
+  function chip(s) { return '<span class="chip ' + s + '">' + STATUS_LABEL[s] + '</span>'; }
+
+  /* ---------- controls ---------- */
+  function buildControls() {
+    FIELDS.forEach(function (f) {
+      var w = document.createElement('div');
+      w.className = 'ctl';
+      w.innerHTML =
+        '<div class="ctl-head"><label for="in-' + f.k + '">' + f.label + '</label>' +
+        '<span class="num"><input type="number" id="in-' + f.k + '" inputmode="decimal" step="any" min="' + f.min + '" max="' + f.max + '">' +
+        '<span class="unit">' + f.unit + '</span></span></div>' +
+        '<input type="range" id="rg-' + f.k + '" min="' + f.min + '" max="' + f.max + '" step="' + f.step + '" aria-label="' + f.label + ' 슬라이더">' +
+        '<p class="hint">' + f.hint + '</p>';
+      $(f.grp === 'main' ? 'ctl-main' : 'ctl-road').appendChild(w);
+      var rg = w.querySelector('#rg-' + f.k), nm = w.querySelector('#in-' + f.k);
+      rg.value = P[f.k]; nm.value = P[f.k];
+      rg.addEventListener('input', function () { setParam(f.k, parseFloat(rg.value), 'rg'); });
+      nm.addEventListener('input', function () {
+        var x = parseFloat(nm.value);
+        if (isFinite(x)) setParam(f.k, clamp(x, f.min, f.max), 'num');
+      });
+      nm.addEventListener('change', function () { nm.value = P[f.k]; });
+    });
+  }
+  function syncControls() {
+    FIELDS.forEach(function (f) { $('rg-' + f.k).value = P[f.k]; $('in-' + f.k).value = +P[f.k].toFixed(2); });
+  }
+  function setParam(k, v, src) {
+    P[k] = v;
+    if (src !== 'rg') $('rg-' + k).value = v;
+    if (src !== 'num') $('in-' + k).value = +v.toFixed(2);
+    if (k === 'r') resetCar();
+    refresh();
+  }
+
+  var PRESETS = [
+    { n: '기본', p: function () { return DEF; } },
+    { n: '과속', p: function () { return { kmh: 110, m: 1500, r: 60, th: 8, mu: 0.7 }; } },
+    { n: '빙판길', p: function () { return { kmh: 40, m: 1500, r: 60, th: 0, mu: 0.1 }; } },
+    { n: '이상 속력', p: function () {
+        var r = 60, th = 15;
+        return { kmh: Math.round(Math.sqrt(G * r * Math.tan(th * Math.PI / 180)) * 36) / 10, m: 1500, r: r, th: th, mu: 0.05 };
+      } },
+    { n: '트럭 (질량 5배)', p: function () { return { kmh: 70, m: 7500, r: 60, th: 8, mu: 0.7 }; } }
+  ];
+  function buildPresets() {
+    PRESETS.forEach(function (ps) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.textContent = ps.n;
+      b.addEventListener('click', function () {
+        var q = ps.p();
+        for (var k in q) P[k] = q[k];
+        syncControls(); resetCar(); refresh();
+      });
+      $('presets').appendChild(b);
+    });
+  }
+
+  /* ---------- tables ---------- */
+  function row(name, val, unit, formula, cls) {
+    return '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td' + (cls === 'sub' ? ' class="sub"' : '') + '>' + name + '</td><td class="n">' + val + '</td><td class="u">' + unit + '</td><td class="f">' + formula + '</td></tr>';
+  }
+  function sec(t) { return '<tr class="sec"><th colspan="4">' + t + '</th></tr>'; }
+  function renderCalc(C) {
+    var h = '<thead><tr><th>항목</th><th class="n">값</th><th>단위</th><th>계산식</th></tr></thead><tbody>';
+    h += sec('조작 변인 (입력)');
+    h += row('속력 v', nf(C.v, 1), 'm/s', nf(P.kmh, 0) + ' km/h ÷ 3.6');
+    h += row('질량 m', nf(P.m, 0), 'kg', '입력값');
+    h += row('회전 반지름 r', nf(P.r, 0), 'm', '입력값');
+    h += row('경사각 θ', nf(P.th, 1), '°', '입력값');
+    h += row('마찰 계수 μ', nf(P.mu, 2), '', '입력값');
+    h += sec('종속 변인 (계산 결과)');
+    h += row('구심 가속도 a', nf(C.a, 2), 'm/s²', 'v² / r');
+    h += row('필요한 구심력 F', nf(C.F, 0), 'N', 'm v² / r', 'key');
+    h += row('수직항력이 담당하는 몫', nf(C.Fn, 0), 'N', 'N sinθ', 'sub');
+    h += row('마찰력이 담당하는 몫', nf(C.Ff, 0), 'N', 'f cosθ (음수면 바깥쪽)', 'sub');
+    h += row('수직항력 N', nf(C.N, 0), 'N', 'm(g cosθ + a sinθ)');
+    h += row('필요한 마찰력 f', nf(C.f, 0), 'N', 'm(a cosθ − g sinθ)');
+    h += row('마찰력 한계', nf(C.fmax, 0), 'N', 'μ N');
+    h += row('선회 주기 T', nf(C.T, 1), 's', '2π r / v');
+    h += sec('주행 한계 속력');
+    h += row('이상 속력 v₀ (마찰 없이 가능)', nf(C.v0 * 3.6, 1), 'km/h', '√(g r tanθ)');
+    h += row('최저 안전 속력', nf(C.vMin, 1), 'km/h', '√(g r (tanθ − μ) / (1 + μ tanθ))');
+    h += row('최고 안전 속력', isFinite(C.vMax) ? nf(C.vMax, 1) : '제한 없음', isFinite(C.vMax) ? 'km/h' : '', '√(g r (tanθ + μ) / (1 − μ tanθ))');
+    h += row('현재 주행 판정', chip(C.status), '', 'a가 허용 범위 안인지 비교');
+    h += sec('시뮬레이션 실측');
+    h += row('궤도 반지름', '<span id="lv-r">—</span>', 'm', '차량에서 중심까지 거리');
+    h += row('경과 시간', '<span id="lv-t">—</span>', 's', '배속 반영');
+    h += row('주행 거리', '<span id="lv-d">—</span>', 'm', '∑ v Δt');
+    h += row('도로 이탈', '<span id="lv-off">—</span>', '', '|궤도 반지름 − r| > 5 m');
+    h += '</tbody>';
+    $('t-calc').innerHTML = h;
+  }
+
+  function renderSens(C) {
+    var cases = [
+      ['속력', '×0.5', { kmh: P.kmh * 0.5 }, nf(P.kmh * 0.5, 0) + ' km/h'],
+      ['속력', '×1 (현재)', {}, nf(P.kmh, 0) + ' km/h'],
+      ['속력', '×1.5', { kmh: P.kmh * 1.5 }, nf(P.kmh * 1.5, 0) + ' km/h'],
+      ['속력', '×2', { kmh: P.kmh * 2 }, nf(P.kmh * 2, 0) + ' km/h'],
+      ['질량', '×0.5', { m: P.m * 0.5 }, nf(P.m * 0.5, 0) + ' kg'],
+      ['질량', '×2', { m: P.m * 2 }, nf(P.m * 2, 0) + ' kg'],
+      ['질량', '×4', { m: P.m * 4 }, nf(P.m * 4, 0) + ' kg'],
+      ['반지름', '×0.5', { r: Math.max(5, P.r * 0.5) }, nf(Math.max(5, P.r * 0.5), 0) + ' m'],
+      ['반지름', '×2', { r: P.r * 2 }, nf(P.r * 2, 0) + ' m'],
+      ['반지름', '×4', { r: P.r * 4 }, nf(P.r * 4, 0) + ' m']
+    ];
+    var h = '<thead><tr><th>변인</th><th>변경</th><th class="n">값</th><th class="n">구심력 F (N)</th><th class="n">현재 대비</th><th>판정</th></tr></thead><tbody>';
+    cases.forEach(function (c) {
+      var q = { kmh: P.kmh, m: P.m, r: P.r, th: P.th, mu: P.mu };
+      for (var k in c[2]) q[k] = c[2][k];
+      var C2 = calc(q), ratio = C.F > 0 ? C2.F / C.F : 0;
+      var base = c[1].indexOf('현재') >= 0;
+      h += '<tr' + (base ? ' class="base"' : '') + '><td>' + c[0] + '</td><td>' + c[1] + '</td><td class="n">' + c[3] + '</td><td class="n">' + nf(C2.F, 0) +
+        '</td><td class="n"><span class="ratio"><span class="bar"><i style="width:' + clamp(ratio / 4, 0, 1) * 100 + '%"></i></span>×' + nf(ratio, 2) + '</span></td><td>' + chip(C2.status) + '</td></tr>';
+    });
+    h += '</tbody>';
+    $('t-sens').innerHTML = h;
+  }
+
+  /* ---------- log ---------- */
+  var LOG = [];
+  try { var raw = localStorage.getItem('curve-sim-log'); if (raw) LOG = JSON.parse(raw) || []; } catch (e) { LOG = []; }
+  function saveLog() { try { localStorage.setItem('curve-sim-log', JSON.stringify(LOG)); } catch (e) {} }
+  function renderLog() {
+    var h = '<thead><tr><th class="n">#</th><th class="n">속력 (km/h)</th><th class="n">질량 (kg)</th><th class="n">반지름 (m)</th><th class="n">경사각 (°)</th><th class="n">μ</th><th class="n">구심력 (N)</th><th>판정</th></tr></thead><tbody>';
+    if (!LOG.length) {
+      h += '<tr><td colspan="8" class="empty">아직 기록이 없습니다. 변인을 바꾼 뒤 ‘현재 조건 기록’을 누르면 한 줄씩 쌓여 비교할 수 있습니다.</td></tr>';
+    } else {
+      LOG.forEach(function (e, i) {
+        h += '<tr><td class="n">' + (i + 1) + '</td><td class="n">' + nf(e.kmh, 0) + '</td><td class="n">' + nf(e.m, 0) + '</td><td class="n">' + nf(e.r, 0) +
+          '</td><td class="n">' + nf(e.th, 1) + '</td><td class="n">' + nf(e.mu, 2) + '</td><td class="n">' + nf(e.F, 0) + '</td><td>' + chip(e.s) + '</td></tr>';
+      });
+    }
+    h += '</tbody>';
+    $('t-log').innerHTML = h;
+  }
+  function logTSV() {
+    var lines = ['번호\t속력(km/h)\t질량(kg)\t반지름(m)\t경사각(°)\t마찰계수\t구심력(N)\t판정'];
+    LOG.forEach(function (e, i) {
+      lines.push([i + 1, e.kmh, e.m, e.r, e.th, e.mu, Math.round(e.F), STATUS_LABEL[e.s]].join('\t'));
+    });
+    return lines.join('\n');
+  }
+  function note(msg) { $('copy-note').textContent = msg; }
+
+  /* ---------- status banner ---------- */
+  var BN_TEXT = {
+    grip: '안정 주행: 필요한 구심력을 도로가 공급합니다',
+    out: '바깥으로 미끄러짐: 필요한 구심력이 도로가 줄 수 있는 최댓값을 넘었습니다',
+    'in': '안쪽으로 미끄러짐: 속력이 낮아 경사면을 따라 흘러내립니다'
+  };
+  function renderStatus(C) {
+    $('banner').setAttribute('data-s', C.status);
+    $('bn-t').textContent = BN_TEXT[C.status];
+    var hi = isFinite(C.aMax) ? nf(C.aMax, 2) : '제한 없음';
+    $('bn-d').textContent = '필요 a = ' + nf(C.a, 2) + ' m/s²  ·  허용 범위 ' + nf(C.aMin, 2) + ' ~ ' + hi + ' m/s²';
+  }
+
+  function refresh() {
+    var C = calc(P);
+    renderCalc(C); renderSens(C); renderStatus(C); drawSide(C);
+  }
+
+  /* ---------- theme colors ---------- */
+  var COL = {};
+  function readColors() {
+    var cs = getComputedStyle(document.documentElement);
+    ['ink', 'muted', 'accent', 'force', 'ok', 'bad', 'road', 'road-edge', 'lane', 'ground', 'grid', 'surface'].forEach(function (n) {
+      COL[n] = cs.getPropertyValue('--' + n).trim();
+    });
+  }
+
+  /* ---------- simulation state ---------- */
+  var S = { x: 0, y: 0, phi: 0, t: 0, dist: 0, off: false, everOff: false, trail: [] };
+  var playing = true, speedMul = 1, lastTs = 0, lastLive = 0;
+  function resetCar() {
+    S.x = P.r; S.y = 0; S.phi = Math.PI / 2; S.t = 0; S.dist = 0; S.off = false; S.everOff = false; S.trail = [];
+  }
+  function stepSim(dt) {
+    var v = P.kmh / 3.6;
+    if (v < 0.01 || dt <= 0) return;
+    var n = Math.max(1, Math.ceil(dt / 0.02)), h = dt / n;
+    var C = calc(P);
+    var a = Math.min(Math.max(C.a, C.aMin), C.aMax);
+    var skid = Math.abs(a - C.a) > 1e-6;
+    for (var i = 0; i < n; i++) {
+      var dphi = a / v * h, mid = S.phi + dphi / 2;
+      S.x += v * Math.cos(mid) * h; S.y += v * Math.sin(mid) * h; S.phi += dphi;
+      S.t += h; S.dist += v * h;
+      S.trail.push([S.x, S.y, skid]);
+    }
+    if (S.trail.length > 1500) S.trail.splice(0, S.trail.length - 1500);
+    var d = Math.hypot(S.x, S.y);
+    S.off = Math.abs(d - P.r) > ROAD_W / 2;
+    if (S.off) S.everOff = true;
+  }
+
+  /* ---------- drawing ---------- */
+  var cv = $('cv'), ctx = cv.getContext('2d'), cv2 = $('cv2'), ctx2 = cv2.getContext('2d');
+  var dpr = 1;
+  function fit(c) {
+    var w = c.clientWidth, h = c.clientHeight;
+    if (!w || !h) return;
+    c.width = Math.round(w * dpr); c.height = Math.round(h * dpr);
+  }
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    fit(cv); fit(cv2); drawSide(calc(P));
+  }
+  function arrow(g, x1, y1, x2, y2, color, label, lw) {
+    var dx = x2 - x1, dy = y2 - y1, len = Math.hypot(dx, dy);
+    if (len < 3) return;
+    var ux = dx / len, uy = dy / len, hs = Math.min(9, len * 0.5);
+    g.strokeStyle = color; g.fillStyle = color; g.lineWidth = lw || 2.5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2 - ux * hs * 0.6, y2 - uy * hs * 0.6); g.stroke();
+    g.beginPath();
+    g.moveTo(x2, y2);
+    g.lineTo(x2 - ux * hs - uy * hs * 0.5, y2 - uy * hs + ux * hs * 0.5);
+    g.lineTo(x2 - ux * hs + uy * hs * 0.5, y2 - uy * hs - ux * hs * 0.5);
+    g.closePath(); g.fill();
+    if (label) {
+      g.font = '600 12px ' + 'IBM Plex Mono, monospace';
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(label, x2 + ux * 14, y2 + uy * 14);
+    }
+  }
+
+  function drawMain() {
+    var W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var half = Math.max(P.r * 1.35, P.r + 25), sc = Math.min(W, H) / 2 / half;
+    var cx = W / 2, cy = H / 2;
+    function X(x) { return cx + x * sc; }
+    function Y(y) { return cy - y * sc; }
+
+    ctx.fillStyle = COL.ground; ctx.fillRect(0, 0, W, H);
+
+    // grid
+    var steps = [1, 2, 5, 10, 20, 50, 100], gs = 100;
+    for (var i = 0; i < steps.length; i++) { if (steps[i] * sc >= 28) { gs = steps[i]; break; } }
+    ctx.strokeStyle = COL.grid; ctx.lineWidth = 1; ctx.beginPath();
+    var wmax = Math.max(W, H) / sc / 2 + gs;
+    for (var gx = -Math.floor(wmax / gs) * gs; gx <= wmax; gx += gs) {
+      ctx.moveTo(Math.round(X(gx)) + 0.5, 0); ctx.lineTo(Math.round(X(gx)) + 0.5, H);
+      ctx.moveTo(0, Math.round(Y(gx)) + 0.5); ctx.lineTo(W, Math.round(Y(gx)) + 0.5);
+    }
+    ctx.stroke();
+
+    // road
+    ctx.fillStyle = COL.road;
+    ctx.beginPath();
+    ctx.arc(cx, cy, (P.r + ROAD_W / 2) * sc, 0, TWO_PI);
+    ctx.arc(cx, cy, (P.r - ROAD_W / 2) * sc, 0, TWO_PI, true);
+    ctx.fill('evenodd');
+    ctx.strokeStyle = COL['road-edge']; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, (P.r + ROAD_W / 2) * sc, 0, TWO_PI); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, (P.r - ROAD_W / 2) * sc, 0, TWO_PI); ctx.stroke();
+    ctx.strokeStyle = COL.lane; ctx.lineWidth = 1.5; ctx.setLineDash([Math.max(4, 3 * sc), Math.max(4, 3 * sc)]);
+    ctx.beginPath(); ctx.arc(cx, cy, P.r * sc, 0, TWO_PI); ctx.stroke(); ctx.setLineDash([]);
+
+    // center + radius
+    var px = X(S.x), py = Y(S.y);
+    ctx.strokeStyle = COL.muted; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(px, py); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = COL.muted;
+    ctx.beginPath(); ctx.arc(cx, cy, 3, 0, TWO_PI); ctx.fill();
+    var d = Math.hypot(S.x, S.y);
+    ctx.font = '12px IBM Plex Mono, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillStyle = COL.ink;
+    ctx.fillText('r = ' + nf(P.r, 0) + ' m', cx + 8, cy - 6);
+
+    // trail
+    var tr = S.trail, n = tr.length;
+    ctx.lineWidth = 2.5; ctx.lineCap = 'round';
+    for (var j = 1; j < n; j++) {
+      ctx.globalAlpha = 0.15 + 0.85 * (j / n);
+      ctx.strokeStyle = tr[j][2] ? COL.bad : COL.accent;
+      ctx.beginPath(); ctx.moveTo(X(tr[j - 1][0]), Y(tr[j - 1][1])); ctx.lineTo(X(tr[j][0]), Y(tr[j][1])); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // car
+    var L = Math.max(4.5 * sc, 26), Wd = L * 0.46;
+    ctx.save();
+    ctx.translate(px, py); ctx.rotate(-S.phi);
+    ctx.fillStyle = S.off ? COL.bad : COL.accent;
+    ctx.strokeStyle = COL.surface; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(-L / 2, -Wd / 2, L, Wd, 4); else ctx.rect(-L / 2, -Wd / 2, L, Wd);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = COL.surface; ctx.globalAlpha = 0.85;
+    ctx.fillRect(L * 0.1, -Wd * 0.34, L * 0.2, Wd * 0.68);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // arrows
+    var v = P.kmh / 3.6, C = calc(P);
+    var ap = Math.min(Math.max(C.a, C.aMin), C.aMax);
+    var lenF = clamp(14 + ap * 9, 0, 120);
+    var lx = -Math.sin(S.phi), ly = Math.cos(S.phi);
+    var start = L * 0.5;
+    arrow(ctx, px, py, px + lx * lenF, py - ly * lenF, COL.force, 'F', 3);
+    var lenV = clamp(14 + v * 1.6, 0, 110);
+    var vx = Math.cos(S.phi), vy = Math.sin(S.phi);
+    arrow(ctx, px + vx * start, py - vy * start, px + vx * (start + lenV), py - vy * (start + lenV), COL.ok, 'v', 2.5);
+
+    // scale bar
+    var bars = [5, 10, 20, 50, 100], bm = 10;
+    for (var k = 0; k < bars.length; k++) { bm = bars[k]; if (bars[k] * sc >= 60) break; }
+    var bx = 14, by = H - 16;
+    ctx.strokeStyle = COL.ink; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(bx, by - 5); ctx.lineTo(bx, by); ctx.lineTo(bx + bm * sc, by); ctx.lineTo(bx + bm * sc, by - 5); ctx.stroke();
+    ctx.fillStyle = COL.ink; ctx.font = '12px IBM Plex Mono, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+    ctx.fillText(bm + ' m', bx, by - 8);
+
+    S._d = d;
+  }
+
+  function drawSide(C) {
+    var W = cv2.clientWidth, H = cv2.clientHeight;
+    if (!W || !H) return;
+    var g = ctx2;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = COL.ground || 'transparent'; g.fillRect(0, 0, W, H);
+    if (!COL.ink) return;
+    var th = C.th, ox = W * 0.55, oy = H * 0.68;
+    var dx = Math.cos(th), dy = Math.sin(th), nx = -Math.sin(th), ny = Math.cos(th);
+    function pt(x, y) { return [ox + x, oy - y]; }
+    // road slab
+    var L1 = W * 0.9, thick = 14;
+    var p1 = pt(-dx * L1, -dy * L1), p2 = pt(dx * L1, dy * L1), p3 = pt(dx * L1 - nx * thick, dy * L1 - ny * thick), p4 = pt(-dx * L1 - nx * thick, -dy * L1 - ny * thick);
+    g.fillStyle = COL.road; g.beginPath(); g.moveTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.lineTo(p3[0], p3[1]); g.lineTo(p4[0], p4[1]); g.closePath(); g.fill();
+    g.strokeStyle = COL['road-edge']; g.lineWidth = 1.5; g.beginPath(); g.moveTo(p1[0], p1[1]); g.lineTo(p2[0], p2[1]); g.stroke();
+    // horizontal reference + angle label
+    g.strokeStyle = COL.muted; g.lineWidth = 1; g.setLineDash([4, 4]);
+    g.beginPath(); g.moveTo(ox - 90, oy); g.lineTo(ox + 90, oy); g.stroke(); g.setLineDash([]);
+    g.fillStyle = COL.muted; g.font = '12px IBM Plex Mono, monospace'; g.textAlign = 'left'; g.textBaseline = 'top';
+    g.fillText('θ = ' + nf(P.th, 1) + '°', ox + 52, oy + 4);
+    g.textAlign = 'left'; g.textBaseline = 'middle';
+    g.fillText('← 도로 중심', 8, 14);
+    // car body
+    var cl = 58, ch = 26;
+    var c1 = pt(-dx * cl / 2, -dy * cl / 2), c2 = pt(dx * cl / 2, dy * cl / 2);
+    var c3 = pt(dx * cl / 2 + nx * ch, dy * cl / 2 + ny * ch), c4 = pt(-dx * cl / 2 + nx * ch, -dy * cl / 2 + ny * ch);
+    g.fillStyle = COL.accent; g.strokeStyle = COL.surface; g.lineWidth = 1.5;
+    g.beginPath(); g.moveTo(c1[0], c1[1]); g.lineTo(c2[0], c2[1]); g.lineTo(c3[0], c3[1]); g.lineTo(c4[0], c4[1]); g.closePath(); g.fill(); g.stroke();
+    // forces, normalised by weight mg
+    var an = C.a / G, Nn = Math.cos(th) + an * Math.sin(th), fn = an * Math.cos(th) - Math.sin(th);
+    var k = 64 / Math.max(1, Nn, Math.abs(fn), an);
+    var cg = pt(nx * ch / 2, ny * ch / 2), gx = cg[0], gy = cg[1];
+    // centripetal (net, horizontal, toward road center = left)
+    g.setLineDash([5, 4]);
+    arrow(g, gx, gy, gx - an * k, gy, COL.force, 'F', 3);
+    g.setLineDash([]);
+    arrow(g, gx, gy, gx, gy + k, COL.muted, 'mg', 2.5);
+    arrow(g, gx, gy, gx + nx * Nn * k, gy - ny * Nn * k, COL.accent, 'N', 2.5);
+    arrow(g, gx, gy, gx - dx * fn * k, gy + dy * fn * k, COL.ok, 'f', 2.5);
+  }
+
+  /* ---------- live cells ---------- */
+  function updateLive() {
+    var e1 = $('lv-r'); if (!e1) return;
+    e1.textContent = nf(S._d || P.r, 1);
+    $('lv-t').textContent = nf(S.t, 1);
+    $('lv-d').textContent = nf(S.dist, 0);
+    var o = $('lv-off');
+    o.innerHTML = S.off ? '<span class="chip out">이탈 중</span>' : (S.everOff ? '<span class="chip in">이탈했다가 복귀</span>' : '<span class="chip grip">도로 위</span>');
+  }
+
+  function frame(ts) {
+    var dt = Math.min(0.05, (ts - lastTs) / 1000 || 0);
+    lastTs = ts;
+    if (playing) stepSim(dt * speedMul);
+    drawMain();
+    if (ts - lastLive > 120) { lastLive = ts; updateLive(); }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------- wiring ---------- */
+  $('b-play').addEventListener('click', function () {
+    playing = !playing; this.textContent = playing ? '일시정지' : '재생';
+  });
+  $('b-reset').addEventListener('click', function () { resetCar(); });
+  $('s-speed').addEventListener('change', function () { speedMul = parseFloat(this.value) || 1; });
+  $('b-log').addEventListener('click', function () {
+    var C = calc(P);
+    LOG.push({ kmh: P.kmh, m: P.m, r: P.r, th: P.th, mu: P.mu, F: C.F, s: C.status });
+    if (LOG.length > 50) LOG.shift();
+    saveLog(); renderLog(); note(LOG.length + '번째 조건을 기록했습니다.');
+  });
+  $('b-clear').addEventListener('click', function () { LOG = []; saveLog(); renderLog(); note('기록을 지웠습니다.'); });
+  $('b-copy').addEventListener('click', function () {
+    if (!LOG.length) { note('복사할 기록이 없습니다.'); return; }
+    var txt = logTSV();
+    function fallback() {
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = txt; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var ok = document.execCommand('copy'); document.body.removeChild(ta);
+        note(ok ? '표를 복사했습니다. 엑셀이나 문서에 붙여 넣을 수 있습니다.' : '복사하지 못했습니다. 표를 직접 선택해 복사해 주세요.');
+      } catch (e) { note('복사하지 못했습니다. 표를 직접 선택해 복사해 주세요.'); }
+    }
+    try {
+      navigator.clipboard.writeText(txt).then(function () { note('표를 복사했습니다. 엑셀이나 문서에 붙여 넣을 수 있습니다.'); }, fallback);
+    } catch (e) { fallback(); }
+  });
+
+  readColors();
+  try {
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { readColors(); drawSide(calc(P)); });
+    new MutationObserver(function () { readColors(); drawSide(calc(P)); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  } catch (e) {}
+  if ('ResizeObserver' in window) { new ResizeObserver(resize).observe(cv); new ResizeObserver(resize).observe(cv2); }
+  window.addEventListener('resize', resize);
+
+  buildControls(); buildPresets(); renderLog(); resetCar();
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    playing = false; $('b-play').textContent = '재생';
+  }
+  resize(); refresh();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
